@@ -12,46 +12,52 @@ class TemporaryButton {
     constructor(log, config, api) {
         this.log = log;
         this.name = config.name;
-        this.onCommand = config.onCommand;
-        this.duration = config.duration || 1000; // Tempo in millisecondi per il ritorno allo stato chiuso
+        // Comando/script da eseguire
+        this.onCommand = config.onCommand || "/var/lib/homebridge/cancelletto.sh";
+        this.duration = config.duration || 1500;
 
-        // Cambia da Switch a Door per usare i comandi "apri" e "chiudi"
-        this.service = new Service.Door(this.name);
+        this.service = new Service.LockMechanism(this.name);
 
-        // Configura le caratteristiche di apertura/chiusura
         this.service
-            .getCharacteristic(Characteristic.TargetDoorState)
-            .on("set", this.handleDoorSet.bind(this));
+            .getCharacteristic(Characteristic.LockTargetState)
+            .on("set", this.handleLockTargetStateSet.bind(this));
 
-        // Stato corrente della porta (aperto/chiuso)
-        this.service
-            .setCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSED);
+        // Stato iniziale: CHIUSO (SECURED)
+        this.service.updateCharacteristic(Characteristic.LockCurrentState, Characteristic.LockCurrentState.SECURED);
+        this.service.updateCharacteristic(Characteristic.LockTargetState, Characteristic.LockTargetState.SECURED);
     }
 
-    handleDoorSet(value, callback) {
-        // Verifica se la porta viene aperta
-        if (value === Characteristic.TargetDoorState.OPEN) {
-            this.log(`Eseguo comando: ${this.onCommand}`);
+    handleLockTargetStateSet(value, callback) {
+        // 1. Rilascia subito la callback a HomeKit
+        callback(null);
 
-            // Esegue il comando per aprire il cancelletto
-            exec(this.onCommand, (error, stdout, stderr) => {
+        if (value === Characteristic.LockTargetState.UNSECURED) {
+            this.log(`Invocazione comando: ${this.onCommand}`);
+
+            // 2. Stato visivo: aperto (qui scatta la notifica nativa, se abilitata)
+            this.service.updateCharacteristic(Characteristic.LockCurrentState, Characteristic.LockCurrentState.UNSECURED);
+
+            // 3. Esegue lo script/comando tramite bash
+            exec(this.onCommand, { shell: '/bin/bash' }, (error, stdout, stderr) => {
                 if (error) {
-                    this.log(`Errore nell'esecuzione del comando: ${error.message}`);
-                } else {
-                    this.log(`Output comando: ${stdout}`);
+                    this.log(`ERRORE ESECUZIONE SCRIPT: ${error.message}`);
+                    return;
+                }
+                if (stderr) {
+                    this.log(`STDERR SCRIPT: ${stderr}`);
+                }
+                if (stdout) {
+                    this.log(`STDOUT SCRIPT: ${stdout.trim()}`);
                 }
             });
 
-            // Imposta lo stato come aperto e poi lo chiude dopo la durata specificata
-            this.service.updateCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.OPEN);
-
+            // 4. Ripristina stato su "Chiuso" (comportamento a impulso)
             setTimeout(() => {
-                this.service.updateCharacteristic(Characteristic.TargetDoorState, Characteristic.TargetDoorState.CLOSED);
-                this.service.updateCharacteristic(Characteristic.CurrentDoorState, Characteristic.CurrentDoorState.CLOSED);
+                this.log("Ripristino stato cancello a Chiuso");
+                this.service.updateCharacteristic(Characteristic.LockTargetState, Characteristic.LockTargetState.SECURED);
+                this.service.updateCharacteristic(Characteristic.LockCurrentState, Characteristic.LockCurrentState.SECURED);
             }, this.duration);
         }
-
-        callback(null);
     }
 
     getServices() {
