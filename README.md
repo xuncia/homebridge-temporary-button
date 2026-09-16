@@ -1,2 +1,2 @@
 # home-bridge-temporary-button
-Create a button that temporary set on ON and after few seconds go to OFF, executing a bash script
+Create a button that temporary unlock a door and then put it locked, executing a bash script
